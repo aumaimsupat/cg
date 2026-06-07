@@ -1,1 +1,1371 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Heart, 
+  User, 
+  Calendar, 
+  Folder, 
+  Plus, 
+  Trash2, 
+  Check, 
+  AlertTriangle, 
+  Edit, 
+  Clock, 
+  Sparkles, 
+  Camera,
+  Layers,
+  Search,
+  CheckCircle,
+  Activity,
+  Lock,
+  LogOut,
+  RefreshCw,
+  Info
+} from 'lucide-react';
 
+// ==========================================
+// !!! โปรดนำ Web App URL ของ Google Apps Script ที่ได้จากการ Deploy มาใส่ที่นี่ !!!
+// ==========================================
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzQp7888-YOUR-DEPLOYED-URL-HERE/exec"; 
+
+export default function App() {
+  // --- AUTH STATE ---
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null); // { caregiver_id, name }
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // --- STATE ---
+  // Patient Info
+  const [patient, setPatient] = useState({
+    name: "ดาวน์โหลดข้อมูล...",
+    age: 0,
+    hn: "HN-xxxxxx",
+    allergies: "กำลังโหลด...",
+    diseases: [],
+    photo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=256&h=256"
+  });
+  
+  const [isEditingPatient, setIsEditingPatient] = useState(false);
+  const [editedPatient, setEditedPatient] = useState({ ...patient });
+
+  // Medications List
+  const [medicines, setMedicines] = useState([]);
+
+  // Active Main View (Tabs: 'dashboard', 'pillbox', 'manage')
+  const [activeTab, setActiveTab] = useState('dashboard');
+  
+  // Selected disease for filtering
+  const [selectedDisease, setSelectedDisease] = useState(null);
+
+  // Daily Check/Track for Medicines (Morning, Noon, Evening, Bed)
+  const [takenTracker, setTakenTracker] = useState({});
+
+  // Form State for Adding/Editing Medication
+  const [medForm, setMedForm] = useState({
+    id: "",
+    name: "",
+    disease: "โรคเบาหวาน",
+    dosage: "",
+    timeSlots: [],
+    instructions: "",
+    barcode: "",
+    pillColor: "bg-white border-slate-300",
+    pillShape: "rounded-full w-8 h-8",
+    notes: ""
+  });
+  const [isEditingMed, setIsEditingMed] = useState(false);
+  const [notification, setNotification] = useState("");
+
+  // Search filter
+  const [searchTerm, setSearchTerm] = useState("");
+
+  // Custom lists of diseases
+  const availableDiseases = ["โรคเบาหวาน", "โรคความดันโลหิตสูง", "โรคไขมันในเลือดสูง", "โรคหัวใจ", "อื่นๆ"];
+
+  // Colors & Shapes presets
+  const colorsPreset = [
+    { name: "ขาว", value: "bg-white border-slate-300" },
+    { name: "ชมพู", value: "bg-pink-200 border-pink-300 text-pink-700" },
+    { name: "ฟ้า", value: "bg-blue-200 border-blue-300 text-blue-700" },
+    { name: "เหลือง", value: "bg-yellow-100 border-yellow-300 text-yellow-700" },
+    { name: "เขียว", value: "bg-emerald-200 border-emerald-300 text-emerald-700" },
+    { name: "ส้ม", value: "bg-orange-200 border-orange-300 text-orange-700" }
+  ];
+
+  const shapesPreset = [
+    { name: "กลมเล็ก", value: "rounded-full w-8 h-8" },
+    { name: "กลมใหญ่", value: "rounded-full w-12 h-12" },
+    { name: "วงรีแนวนอน", value: "rounded-full w-12 h-6" },
+    { name: "แคปซูล", value: "rounded-2xl w-14 h-6 border-2" },
+    { name: "สี่เหลี่ยมมน", value: "rounded-lg w-8 h-8" }
+  ];
+
+  // ค้นหารายชื่อและเช็คเข้าใช้งานอัตโนมัติจาก LocalStorage ถ้าเคยเข้าระบบไว้แล้ว
+  useEffect(() => {
+    const savedCaregiver = localStorage.getItem('caremed_user');
+    if (savedCaregiver) {
+      const parsedUser = JSON.parse(savedCaregiver);
+      setCurrentUser(parsedUser);
+      setIsLoggedIn(true);
+    }
+  }, []);
+
+  // ดึงข้อมูลผู้ป่วยและรายการยา เมื่อล็อกอินเข้าสู่ระบบได้สำเร็จ
+  useEffect(() => {
+    if (isLoggedIn && currentUser) {
+      fetchSheetData(currentUser.caregiver_id);
+    }
+  }, [isLoggedIn, currentUser]);
+
+  // --- API CALLS (GOOGLE SHEETS) ---
+
+  const handleLoginSubmit = async (e) => {
+    e.preventDefault();
+    if (!loginUsername.trim() || !loginPassword.trim()) {
+      setAuthError("กรุณากรอกทั้งชื่อผู้ใช้และรหัสผ่าน");
+      return;
+    }
+
+    if (GOOGLE_SCRIPT_URL.includes("YOUR-DEPLOYED-URL-HERE")) {
+      // จำลองข้อมูลเพื่อให้สามารถเปิดรันพรีวิวได้แม้ยังไม่ได้ผูก URL จริง
+      if (loginUsername === "demo" && loginPassword === "1234") {
+        const mockUser = { caregiver_id: "CG-DEMO", name: "ผู้แลสมมติ (โหมดทดสอบ)" };
+        setCurrentUser(mockUser);
+        setIsLoggedIn(true);
+        localStorage.setItem('caremed_user', JSON.stringify(mockUser));
+        setPatient({
+          name: "นายสมชาย ใจดี (ตัวอย่างแบบไม่ต่อชีต)",
+          age: 72,
+          hn: "HN-998124",
+          allergies: "ยาแก้ปวดกลุ่ม NSAIDs",
+          diseases: ["โรคเบาหวาน", "โรคความดันโลหิตสูง"],
+          photo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=256&h=256"
+        });
+        setMedicines([
+          { id: "med-1", name: "Metformin (เมทฟอร์มิน)", disease: "โรคเบาหวาน", dosage: "500 มิลลิกรัม", timeSlots: ["เช้า", "เย็น"], instructions: "หลังอาหารทันที", barcode: "8851234567890", pillColor: "bg-white border-slate-300", pillShape: "rounded-full w-8 h-8", notes: "ทานตอนท้องว่างอาจคลื่นไส้" }
+        ]);
+        triggerNotification("ล็อกอินสำเร็จ! (โหมดทดสอบ)");
+        return;
+      }
+      setAuthError("กรุณาติดตั้ง Google Apps Script Web App URL ในโค้ด หรือใช้ Username: 'demo' Password: '1234' เพื่อพรีวิวการทำงาน");
+      return;
+    }
+
+    setIsLoading(true);
+    setAuthError("");
+    try {
+      const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=login&username=${encodeURIComponent(loginUsername)}&password=${encodeURIComponent(loginPassword)}`);
+      const result = await response.json();
+      
+      if (result.status === "success") {
+        setCurrentUser(result.caregiver);
+        setIsLoggedIn(true);
+        localStorage.setItem('caremed_user', JSON.stringify(result.caregiver));
+        triggerNotification(`ยินดีต้อนรับคุณ ${result.caregiver.name}`);
+      } else {
+        setAuthError(result.message || "การล็อกอินล้มเหลว");
+      }
+    } catch (err) {
+      setAuthError("เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์");
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchSheetData = async (caregiverId) => {
+    if (GOOGLE_SCRIPT_URL.includes("YOUR-DEPLOYED-URL-HERE")) return;
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=getData&caregiver_id=${encodeURIComponent(caregiverId)}`);
+      const result = await response.json();
+      
+      if (result.status === "success") {
+        setPatient(result.patient);
+        setEditedPatient(result.patient);
+        setMedicines(result.medicines);
+        triggerNotification("ดึงข้อมูลล่าสุดจาก Google Sheets สำเร็จ!");
+      } else {
+        triggerNotification("ไม่สามารถโหลดข้อมูลจากระบบสเปรดชีตได้");
+      }
+    } catch (err) {
+      triggerNotification("ไม่สามารถเชื่อมต่อ Google Sheets เพื่อโหลดข้อมูลได้");
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const savePatientToSheet = async (updatedPatient) => {
+    if (GOOGLE_SCRIPT_URL.includes("YOUR-DEPLOYED-URL-HERE")) {
+      setPatient(updatedPatient);
+      triggerNotification("บันทึกข้อมูลสำเร็จ (โหมดจำลอง)");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const response = await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors', // รองรับ Apps Script Redirect
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: "savePatient",
+          caregiver_id: currentUser.caregiver_id,
+          patient: updatedPatient
+        })
+      });
+      // เนื่องจากใช้ no-cors ผลตอบรับอาจไม่มีบอดี้ ให้อัปเดตสเตตภายในตัวทันที
+      setPatient(updatedPatient);
+      triggerNotification("อัปเดตประวัติผู้ป่วยขึ้น Google Sheets เรียบร้อย!");
+    } catch (err) {
+      triggerNotification("เกิดข้อผิดพลาดในการบันทึกข้อมูลลง Google Sheets");
+      console.error(err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveMedicinesToSheet = async (updatedMedicines) => {
+    if (GOOGLE_SCRIPT_URL.includes("YOUR-DEPLOYED-URL-HERE")) {
+      setMedicines(updatedMedicines);
+      triggerNotification("อัปเดตข้อมูลยาสำเร็จ (โหมดจำลอง)");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: "saveMedicines",
+          caregiver_id: currentUser.caregiver_id,
+          medicines: updatedMedicines
+        })
+      });
+      setMedicines(updatedMedicines);
+      triggerNotification("บันทึกตารางยาทั้งหมดขึ้น Google Sheets สำเร็จ!");
+    } catch (err) {
+      triggerNotification("เกิดข้อผิดพลาดในการเซฟข้อมูลยาลงสเปรดชีต");
+      console.error(err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('caremed_user');
+    setIsLoggedIn(false);
+    setCurrentUser(null);
+    setMedicines([]);
+    setPatient({ name: "", age: 0, hn: "", allergies: "", diseases: [], photo: "" });
+    setLoginUsername("");
+    setLoginPassword("");
+  };
+
+  // --- ACTIONS ---
+  const triggerNotification = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(""), 3500);
+  };
+
+  // Save Patient Profile
+  const handleSavePatient = (e) => {
+    e.preventDefault();
+    savePatientToSheet(editedPatient);
+    setIsEditingPatient(false);
+  };
+
+  // Toggle Time Slots in Medication Form
+  const handleTimeSlotToggle = (slot) => {
+    const current = [...medForm.timeSlots];
+    if (current.includes(slot)) {
+      setMedForm({ ...medForm, timeSlots: current.filter(s => s !== slot) });
+    } else {
+      setMedForm({ ...medForm, timeSlots: [...current, slot] });
+    }
+  };
+
+  // Add/Edit Medication Submit
+  const handleMedSubmit = (e) => {
+    e.preventDefault();
+    if (!medForm.name.trim()) {
+      triggerNotification("กรุณากรอกชื่อยา");
+      return;
+    }
+
+    let updatedList = [];
+    if (isEditingMed) {
+      // Edit
+      updatedList = medicines.map(m => m.id === medForm.id ? { ...medForm } : m);
+    } else {
+      // Add new
+      const newMed = {
+        ...medForm,
+        id: "med-" + Date.now()
+      };
+      updatedList = [...medicines, newMed];
+    }
+
+    saveMedicinesToSheet(updatedList);
+    resetMedForm();
+  };
+
+  const resetMedForm = () => {
+    setMedForm({
+      id: "",
+      name: "",
+      disease: "โรคเบาหวาน",
+      dosage: "",
+      timeSlots: [],
+      instructions: "",
+      barcode: "",
+      pillColor: "bg-white border-slate-300",
+      pillShape: "rounded-full w-8 h-8",
+      notes: ""
+    });
+    setIsEditingMed(false);
+  };
+
+  const handleEditMedStart = (med) => {
+    setMedForm({ ...med });
+    setIsEditingMed(true);
+    setActiveTab('manage');
+  };
+
+  const handleDeleteMed = (id, name) => {
+    // ใช้ Custom Dialog แทน Confirm Browser Native เพื่อความสวยงามและไม่ติดขัดใน iframe
+    const confirmDelete = window.confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบรายการยา "${name}"?`);
+    if (confirmDelete) {
+      const updatedList = medicines.filter(m => m.id !== id);
+      saveMedicinesToSheet(updatedList);
+    }
+  };
+
+  // Toggle Check status for pill tracking (In-Memory per session)
+  const togglePillTaken = (timeSlot, medId) => {
+    const today = new Date().toDateString();
+    const key = `${today}-${timeSlot}-${medId}`;
+    setTakenTracker(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  // Simulate Barcode Scanner
+  const simulateBarcodeScan = () => {
+    const randomBarcodes = ["8851023451011", "8852304910329", "8859942318042", "8853381004829"];
+    const randomBarcode = randomBarcodes[Math.floor(Math.random() * randomBarcodes.length)];
+    
+    const mockMeds = [
+      { name: "Paracetamol (ยาแก้ปวดพารา)", dosage: "500 มิลลิกรัม", instructions: "ทุก 4-6 ชั่วโมงเมื่อมีอาการ", disease: "อื่นๆ", notes: "ไม่ควรทานเกิน 8 เม็ดต่อวัน" },
+      { name: "Losartan (ยาลดความดันโลหิต)", dosage: "50 มิลลิกรัม", instructions: "หลังอาหารเช้าทันที", disease: "โรคความดันโลหิตสูง", notes: "ระวังอาการหน้ามืดวิงเวียน" },
+      { name: "Glipizide (ยาคุมระดับน้ำตาลเบาหวาน)", dosage: "5 มิลลิกรัม", instructions: "ก่อนอาหารเช้า 30 นาที", disease: "โรคเบาหวาน", notes: "สังเกตอาการเหงื่อออกสั่นกระวนกระวายจากน้ำตาลต่ำ" }
+    ];
+    const picked = mockMeds[Math.floor(Math.random() * mockMeds.length)];
+
+    setMedForm(prev => ({
+      ...prev,
+      barcode: randomBarcode,
+      name: picked.name,
+      dosage: picked.dosage,
+      instructions: picked.instructions,
+      disease: picked.disease,
+      notes: picked.notes
+    }));
+    triggerNotification("จำลองการสแกนบาร์โค้ดสำเร็จ! ดึงข้อมูลยาอัตโนมัติ");
+  };
+
+  // -----------------------------------------------------------------
+  // VIEW 1: LOGIN PAGE (เมื่อยังไม่เข้าระบบ)
+  // -----------------------------------------------------------------
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-800 rounded-3xl border border-slate-700/60 p-8 shadow-2xl space-y-6">
+          <div className="text-center space-y-3">
+            <div className="inline-flex p-4 bg-rose-500/10 rounded-full border border-rose-500/30">
+              <Heart className="w-10 h-10 text-rose-500 fill-rose-500/20" />
+            </div>
+            <h1 className="text-2xl font-black text-white tracking-wide">CareMed Easy</h1>
+            <p className="text-slate-400 text-sm">เข้าสู่ระบบเพื่อเข้าถึงและจัดการตารางยาของผู้ป่วยที่คุณดูแล</p>
+          </div>
+
+          <form onSubmit={handleLoginSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">ชื่อผู้ใช้งาน (Username)</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
+                  <User className="w-5 h-5" />
+                </span>
+                <input 
+                  type="text" 
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  placeholder="เช่น caregiver1" 
+                  className="w-full bg-slate-900 border border-slate-700/80 rounded-xl py-3 pl-11 pr-4 text-slate-200 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/50"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">รหัสผ่าน (Password)</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
+                  <Lock className="w-5 h-5" />
+                </span>
+                <input 
+                  type="password" 
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="••••••" 
+                  className="w-full bg-slate-900 border border-slate-700/80 rounded-xl py-3 pl-11 pr-4 text-slate-200 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500/50"
+                  required
+                />
+              </div>
+            </div>
+
+            {authError && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-200 text-xs p-3 rounded-xl flex items-start space-x-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>{authError}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-extrabold py-3.5 rounded-xl transition duration-150 transform active:scale-95 text-sm flex items-center justify-center space-x-2 shadow-lg shadow-rose-950/20"
+            >
+              {isLoading ? (
+                <RefreshCw className="w-5 h-5 animate-spin" />
+              ) : (
+                <span>เข้าสู่ระบบรักษาความปลอดภัย</span>
+              )}
+            </button>
+          </form>
+
+          {GOOGLE_SCRIPT_URL.includes("YOUR-DEPLOYED-URL-HERE") && (
+            <div className="bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] p-3.5 rounded-xl space-y-1">
+              <div className="font-bold flex items-center space-x-1.5">
+                <Info className="w-4 h-4" />
+                <span>ข้อมูลประกอบการพรีวิวทดลองเล่น</span>
+              </div>
+              <p>ตอนนี้ยังไม่มีการผูก URL ของคุณ คุณสามารถเข้าดูระบบเดโม่จำลองได้โดยป้อนค่าต่อไปนี้:</p>
+              <p className="font-mono bg-slate-900/50 p-1.5 rounded mt-1">Username: <span className="text-white">demo</span> | Password: <span className="text-white">1234</span></p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // -----------------------------------------------------------------
+  // VIEW 2: LOGGED IN APPLICATION
+  // -----------------------------------------------------------------
+  return (
+    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans pb-16">
+      
+      {/* Toast Notification Banner */}
+      {notification && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-rose-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center space-x-2 animate-bounce border border-rose-400">
+          <Sparkles className="w-5 h-5 text-yellow-300 animate-pulse" />
+          <span className="font-semibold text-sm">{notification}</span>
+        </div>
+      )}
+
+      {/* Modern Friendly Header */}
+      <header className="bg-gradient-to-r from-rose-600 via-pink-600 to-rose-700 shadow-xl sticky top-0 z-40 text-white">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col sm:flex-row justify-between items-center space-y-2 sm:space-y-0">
+          <div className="flex items-center space-x-3">
+            <div className="bg-white p-2 rounded-full shadow-inner">
+              <Heart className="w-6 h-6 text-rose-600 fill-rose-600" />
+            </div>
+            <div>
+              <h1 className="text-xl font-extrabold tracking-wide">CareMed Easy</h1>
+              <p className="text-xs text-rose-100 font-medium">แอปช่วยจัดและบันทึกยาผู้ป่วย สำหรับผู้ดูแล & ญาติ</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center space-x-3">
+            {/* Quick status user & Logout */}
+            <div className="flex items-center space-x-2 bg-rose-800/60 px-4 py-1.5 rounded-full border border-rose-500/30 text-xs">
+              <User className="w-3.5 h-3.5 text-rose-200" />
+              <span className="font-semibold">ผู้ดูแล: {currentUser.name}</span>
+            </div>
+            <button 
+              onClick={() => {
+                if (window.confirm("คุณต้องการออกจากระบบใช่หรือไม่?")) handleLogout();
+              }}
+              className="p-1.5 bg-rose-800/80 hover:bg-red-700 rounded-full text-white transition-colors"
+              title="ออกจากระบบ"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Sync Status Bar */}
+      <div className="bg-slate-800/60 border-b border-slate-700/60 py-2 px-4 text-xs">
+        <div className="max-w-6xl mx-auto flex justify-between items-center">
+          <span className="text-slate-400">
+            ระบบทำงานออนไลน์: ข้อมูลของ <strong>{patient.name || 'ผู้ป่วย'}</strong> จะซิงก์กลับไปที่ Google Sheets เสมอ
+          </span>
+          <button 
+            onClick={() => fetchSheetData(currentUser.caregiver_id)} 
+            disabled={isLoading || isSaving}
+            className="flex items-center space-x-1.5 text-pink-400 hover:text-pink-300 font-bold transition disabled:opacity-40"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>{isLoading ? "กำลังรีเฟรช..." : "ซิงก์กับชีตตอนนี้"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Main Grid Layout */}
+      <main className="max-w-6xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        {/* ================= LEFT COLUMN: PATIENT CARD & NAV ================= */}
+        <div className="lg:col-span-4 space-y-6">
+          
+          {/* PATIENT CARD (บัตรผู้ป่วยที่ดูแล) */}
+          <div className="bg-pink-100 rounded-3xl p-6 shadow-xl border-4 border-pink-200 text-slate-800 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-pink-200 rounded-bl-full opacity-50 -z-0"></div>
+            
+            <div className="relative z-10">
+              <div className="flex justify-between items-center mb-4">
+                <span className="bg-pink-300 text-pink-900 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+                  ผู้ป่วยในการดูแลของคุณ
+                </span>
+                <button 
+                  onClick={() => {
+                    setIsEditingPatient(!isEditingPatient);
+                    setEditedPatient({ ...patient });
+                  }}
+                  className="p-2 bg-white/80 hover:bg-white rounded-full transition-all text-pink-700 shadow-sm"
+                  title="แก้ไขข้อมูลผู้ป่วย"
+                >
+                  <Edit className="w-4 h-4" />
+                </button>
+              </div>
+
+              {!isEditingPatient ? (
+                /* Patient Info View Mode */
+                <div className="flex flex-col sm:flex-row lg:flex-col xl:flex-row items-center space-y-4 sm:space-y-0 xl:space-y-0 sm:space-x-4 xl:space-x-4">
+                  <div className="relative">
+                    <img 
+                      src={patient.photo || "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=256&h=256"} 
+                      alt="Patient Profile" 
+                      className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl object-cover border-4 border-white shadow-md bg-slate-200"
+                    />
+                    <div className="absolute -bottom-2 -right-2 bg-emerald-500 text-white p-1 rounded-full border-2 border-white shadow">
+                      <Check className="w-4 h-4" />
+                    </div>
+                  </div>
+                  
+                  <div className="flex-1 text-center sm:text-left xl:text-left">
+                    <h3 className="text-xl font-bold text-slate-900">{patient.name || "ไม่ระบุชื่อ"}</h3>
+                    <p className="text-sm font-semibold text-slate-600 mt-1">อายุ {patient.age || 0} ปี | {patient.hn}</p>
+                    
+                    <div className="mt-3 bg-red-50 text-red-700 px-3 py-1.5 rounded-lg border border-red-200 text-xs flex items-center space-x-1.5 justify-center sm:justify-start">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                      <span className="font-bold">แพ้ยา: {patient.allergies || "ไม่มีข้อมูลประวัติการแพ้ยา"}</span>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-1 justify-center sm:justify-start">
+                      {patient.diseases && patient.diseases.map((dis, idx) => (
+                        <span key={idx} className="bg-white/90 text-slate-700 text-[10px] px-2 py-0.5 rounded-md border border-slate-200 font-semibold shadow-2xs">
+                          {dis}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Patient Info Edit Mode */
+                <form onSubmit={handleSavePatient} className="space-y-3 text-slate-700">
+                  <div>
+                    <label className="block text-xs font-bold mb-1 text-slate-700">ชื่อ-นามสกุลผู้ป่วย</label>
+                    <input 
+                      type="text" 
+                      value={editedPatient.name || ""}
+                      onChange={(e) => setEditedPatient({ ...editedPatient, name: e.target.value })}
+                      className="w-full text-sm p-2 rounded-lg bg-white border border-pink-300 focus:outline-none focus:ring-2 focus:ring-pink-500"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-bold mb-1 text-slate-700">อายุ</label>
+                      <input 
+                        type="number" 
+                        value={editedPatient.age || 0}
+                        onChange={(e) => setEditedPatient({ ...editedPatient, age: parseInt(e.target.value) || 0 })}
+                        className="w-full text-sm p-2 rounded-lg bg-white border border-pink-300 focus:outline-none focus:ring-2 focus:ring-pink-500"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1 text-slate-700">HN ผู้ป่วย</label>
+                      <input 
+                        type="text" 
+                        value={editedPatient.hn || ""}
+                        onChange={(e) => setEditedPatient({ ...editedPatient, hn: e.target.value })}
+                        className="w-full text-sm p-2 rounded-lg bg-white border border-pink-300 focus:outline-none focus:ring-2 focus:ring-pink-500"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1 text-slate-700">ประวัติแพ้ยา</label>
+                    <input 
+                      type="text" 
+                      value={editedPatient.allergies || ""}
+                      onChange={(e) => setEditedPatient({ ...editedPatient, allergies: e.target.value })}
+                      className="w-full text-sm p-2 rounded-lg bg-white border border-pink-300 focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    />
+                  </div>
+                  <div className="flex space-x-2 pt-2">
+                    <button 
+                      type="submit" 
+                      disabled={isSaving}
+                      className="flex-1 bg-pink-600 hover:bg-pink-700 text-white text-xs font-bold py-2 px-3 rounded-lg transition disabled:opacity-40"
+                    >
+                      {isSaving ? "กำลังเซฟ..." : "บันทึกข้อมูล"}
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => setIsEditingPatient(false)}
+                      className="bg-slate-300 hover:bg-slate-400 text-slate-800 text-xs font-bold py-2 px-3 rounded-lg transition"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+
+          {/* THREE NAVIGATION BUTTONS */}
+          <div className="bg-pink-100/10 rounded-3xl p-6 border-2 border-pink-500/30 space-y-3 shadow-md">
+            <h4 className="text-sm font-bold text-pink-300 tracking-wider uppercase mb-2 flex items-center space-x-1.5">
+              <Layers className="w-4 h-4 text-pink-400" />
+              <span>เมนูหลักในการจัดการยา</span>
+            </h4>
+            
+            <button 
+              onClick={() => { setActiveTab('pillbox'); setSelectedDisease(null); }}
+              className={`w-full flex items-center justify-between p-4 rounded-2xl font-bold transition-all duration-200 border text-left ${
+                activeTab === 'pillbox' 
+                  ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-lg border-pink-400 translate-x-1' 
+                  : 'bg-slate-800 text-pink-100 border-slate-700 hover:bg-slate-700/80 hover:border-pink-500/40'
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-pink-500/20 rounded-xl">
+                  <Calendar className="w-5 h-5 text-pink-300" />
+                </div>
+                <div>
+                  <div className="text-sm">ตารางจัด/ตรวจยา</div>
+                  <div className="text-[10px] text-pink-200/60 font-normal">เช็กการจ่ายยารายวัน เช้า กลางวัน เย็น</div>
+                </div>
+              </div>
+              <CheckCircle className="w-5 h-5 opacity-80" />
+            </button>
+
+            <button 
+              onClick={() => { setActiveTab('dashboard'); setSelectedDisease(null); }}
+              className={`w-full flex items-center justify-between p-4 rounded-2xl font-bold transition-all duration-200 border text-left ${
+                activeTab === 'dashboard' && selectedDisease === null
+                  ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-lg border-pink-400 translate-x-1' 
+                  : 'bg-slate-800 text-pink-100 border-slate-700 hover:bg-slate-700/80 hover:border-pink-500/40'
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-pink-500/20 rounded-xl">
+                  <Folder className="w-5 h-5 text-pink-300" />
+                </div>
+                <div>
+                  <div className="text-sm">ดูยาทั้งหมด</div>
+                  <div className="text-[10px] text-pink-200/60 font-normal">แยกตามโรคประจำตัว / ยาทั้งหมด</div>
+                </div>
+              </div>
+              <span className="bg-pink-500 text-white text-xs px-2.5 py-0.5 rounded-full font-bold">
+                {medicines.length} ตัว
+              </span>
+            </button>
+
+            <button 
+              onClick={() => { setActiveTab('manage'); resetMedForm(); }}
+              className={`w-full flex items-center justify-between p-4 rounded-2xl font-bold transition-all duration-200 border text-left ${
+                activeTab === 'manage' 
+                  ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-lg border-pink-400 translate-x-1' 
+                  : 'bg-slate-800 text-pink-100 border-slate-700 hover:bg-slate-700/80 hover:border-pink-500/40'
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-pink-500/20 rounded-xl">
+                  <Plus className="w-5 h-5 text-pink-300" />
+                </div>
+                <div>
+                  <div className="text-sm">แก้ไข / เพิ่ม / ลบยา</div>
+                  <div className="text-[10px] text-pink-200/60 font-normal">เพิ่มยาตัวใหม่ จัดหมวดหมู่ยา</div>
+                </div>
+              </div>
+              <Plus className="w-5 h-5" />
+            </button>
+
+          </div>
+
+          {/* Safety Reminder */}
+          <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 rounded-2xl p-5 border border-amber-500/20 text-xs space-y-2">
+            <div className="flex items-center space-x-2 text-amber-400 font-bold text-sm mb-1">
+              <Activity className="w-4 h-4" />
+              <span>คู่มือความปลอดภัยสำหรับผู้ดูแล</span>
+            </div>
+            <p className="text-slate-300 leading-relaxed">
+              • ควรตรวจสอบ <strong>"ชื่อผู้ป่วย"</strong> บนซองยาทุกครั้งก่อนจ่ายยาจริง <br/>
+              • ระบบกำลังเชื่อมต่อกับชีตกลาง ตรวจสอบการอัปเดตทุกครั้งเพื่อความแม่นยำในกลุ่มทีมดูแล
+            </p>
+          </div>
+
+        </div>
+
+        {/* ================= RIGHT COLUMN: INTERACTIVE VIEWS ================= */}
+        <div className="lg:col-span-8">
+          
+          {/* ================= TAB 1: DASHBOARD & GROUP BY DISEASE ================= */}
+          {activeTab === 'dashboard' && (
+            <div className="space-y-6">
+              
+              {/* Header block with search */}
+              <div className="bg-slate-800/80 p-6 rounded-3xl border border-slate-700/80 shadow-md">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-3 sm:space-y-0">
+                  <div>
+                    <h2 className="text-2xl font-black text-white flex items-center space-x-2">
+                      <Folder className="w-6 h-6 text-pink-400" />
+                      <span>รายการยาทั้งหมดของผู้ป่วย</span>
+                    </h2>
+                    <p className="text-sm text-slate-400">เลือกดูยาจัดแยกหมวดหมู่ตามโรคเพื่อดูคำเตือนและวิธีให้ยาอย่างละเอียด</p>
+                  </div>
+                  
+                  {/* Real-time search */}
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                    <input 
+                      type="text" 
+                      placeholder="ค้นหาชื่อยา..." 
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 text-xs rounded-xl bg-slate-900 border border-slate-700 focus:outline-none focus:border-pink-500 text-slate-100 placeholder-slate-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Disease Grid */}
+              <div>
+                <h3 className="text-lg font-bold text-pink-300 mb-3 flex items-center space-x-2">
+                  <Layers className="w-5 h-5 text-pink-400" />
+                  <span>จัดกลุ่มแยกตามโรค (เลือกเพื่อกรองดูยา)</span>
+                </h3>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  
+                  {/* ALL Group */}
+                  <button 
+                    onClick={() => setSelectedDisease(null)}
+                    className={`p-4 rounded-2xl text-left border transition-all duration-200 relative overflow-hidden ${
+                      selectedDisease === null 
+                        ? 'bg-gradient-to-br from-pink-500/20 to-rose-500/20 text-pink-100 border-pink-400 shadow-lg' 
+                        : 'bg-slate-800/50 text-slate-300 border-slate-700 hover:bg-slate-800 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="font-extrabold text-sm mb-1">แสดงยาพกพาทั้งหมด</div>
+                    <div className="text-xs opacity-60 font-semibold">{medicines.length} รายการ</div>
+                    <div className="absolute right-2 bottom-2 text-[10px] bg-slate-700 px-2 py-0.5 rounded-full text-slate-300 font-bold">
+                      ดูยารวม
+                    </div>
+                  </button>
+
+                  {/* Disease Categories */}
+                  {availableDiseases.map((disease) => {
+                    const count = medicines.filter(m => m.disease === disease).length;
+                    const isSelected = selectedDisease === disease;
+                    return (
+                      <button 
+                        key={disease}
+                        onClick={() => setSelectedDisease(disease)}
+                        className={`p-4 rounded-2xl text-left border transition-all duration-200 relative overflow-hidden ${
+                          isSelected 
+                            ? 'bg-gradient-to-br from-pink-500/30 to-rose-500/30 text-pink-100 border-pink-400 shadow-md' 
+                            : 'bg-slate-800/50 text-slate-300 border-slate-700 hover:bg-slate-800 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="font-extrabold text-sm mb-1 truncate">{disease}</div>
+                        <div className="text-xs opacity-60 font-semibold">{count} รายการยา</div>
+                        <div className="absolute right-2 bottom-2 text-[10px] bg-pink-900/40 text-pink-300 px-2 py-0.5 rounded-full font-bold">
+                          กลุ่มโรค
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* VIEW AREA FOR SELECTED DISEASE OR ALL */}
+              <div className="bg-slate-800/40 p-6 rounded-3xl border border-slate-700/80">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-bold text-white">
+                    {selectedDisease ? `ยาสำหรับรักษา: ${selectedDisease}` : "รายการยาทั้งหมด"}
+                  </h3>
+                  {selectedDisease && (
+                    <button 
+                      onClick={() => setSelectedDisease(null)}
+                      className="text-xs text-pink-400 hover:text-pink-300 font-bold underline"
+                    >
+                      ย้อนกลับไปดูทั้งหมด
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter medicines */}
+                {(() => {
+                  const filtered = medicines.filter(m => {
+                    const matchesDisease = selectedDisease ? m.disease === selectedDisease : true;
+                    const matchesSearch = m.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                          m.disease.toLowerCase().includes(searchTerm.toLowerCase());
+                    return matchesDisease && matchesSearch;
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="text-center py-12 text-slate-500 border-2 border-dashed border-slate-700 rounded-2xl">
+                        <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-slate-500" />
+                        <p className="text-sm">ไม่พบรายการยาดังกล่าวในระบบของท่าน</p>
+                        <button 
+                          onClick={() => { setActiveTab('manage'); resetMedForm(); }}
+                          className="mt-3 text-xs bg-pink-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-pink-700"
+                        >
+                          คลิกเพื่อเพิ่มยาใหม่ทันที
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      {filtered.map((med) => (
+                        <div 
+                          key={med.id}
+                          className="bg-pink-50 text-slate-800 rounded-2xl p-5 border-2 border-pink-200 shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all hover:border-pink-300"
+                        >
+                          <div className="space-y-2 flex-1">
+                            <div className="flex flex-wrap gap-2 items-center">
+                              <span className="bg-pink-200 text-pink-800 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                                {med.disease}
+                              </span>
+                              {med.barcode && (
+                                <span className="bg-slate-200 text-slate-700 text-[10px] px-2 py-0.5 rounded font-mono">
+                                  [Barcode: {med.barcode}]
+                                </span>
+                              )}
+                            </div>
+
+                            <h4 className="text-lg font-black text-slate-900 leading-tight">
+                              {med.name}
+                            </h4>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm mt-2">
+                              <div>
+                                <span className="text-slate-500 text-xs block font-bold">ขนาดรับประทาน:</span>
+                                <span className="font-semibold text-slate-800">{med.dosage}</span>
+                              </div>
+                              <div>
+                                <span className="text-red-500 text-xs block font-bold">⚠️ วิธีทาน / ข้อควรระวัง:</span>
+                                <span className="font-semibold text-slate-800 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded inline-block">
+                                  {med.instructions}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center space-x-2 text-xs text-slate-500 pt-1">
+                              <Clock className="w-3.5 h-3.5" />
+                              <span className="font-bold">เวลาที่ต้องทาน:</span>
+                              <div className="flex gap-1">
+                                {med.timeSlots && med.timeSlots.map(slot => (
+                                  <span key={slot} className="bg-slate-200 text-slate-800 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                    {slot}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+
+                            {med.notes && (
+                              <p className="text-xs text-slate-500 bg-white p-2 rounded-lg border border-slate-100 italic">
+                                หมายเหตุ: {med.notes}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Pill Image Section */}
+                          <div className="flex flex-row md:flex-col items-center justify-center space-x-3 md:space-x-0 md:space-y-2 bg-white/90 p-4 rounded-xl border border-pink-200 self-stretch md:self-auto min-w-[120px]">
+                            <span className="text-xs text-slate-500 font-bold">ลักษณะเม็ดยา</span>
+                            
+                            <div className="h-16 flex items-center justify-center">
+                              <div className={`${med.pillColor} ${med.pillShape} border-2 shadow-sm flex items-center justify-center overflow-hidden`}>
+                                <span className="text-[8px] opacity-25 font-bold">RX</span>
+                              </div>
+                            </div>
+
+                            <div className="flex space-x-2 w-full pt-1">
+                              <button 
+                                onClick={() => handleEditMedStart(med)}
+                                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-1 px-2 rounded text-[10px] font-bold transition flex justify-center items-center"
+                              >
+                                <Edit className="w-3 h-3 mr-1" /> แก้ไข
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteMed(med.id, med.name)}
+                                className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded transition"
+                                title="ลบ"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
+            </div>
+          )}
+
+
+          {/* ================= TAB 2: DETAILED PILLBOX SCHEDULE ================= */}
+          {activeTab === 'pillbox' && (
+            <div className="space-y-6">
+              <div className="bg-slate-800/80 p-6 rounded-3xl border border-slate-700/80 flex justify-between items-center">
+                <div>
+                  <h2 className="text-2xl font-black text-white flex items-center space-x-2">
+                    <Calendar className="w-6 h-6 text-pink-400" />
+                    <span>ตารางตรวจและเช็กยาประจำวัน (เช้า / กลางวัน / เย็น)</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    ผู้ดูแลคลิก <strong>"เช็กว่าจ่ายยาแล้ว"</strong> เพื่อป้องกันการป้อนซ้ำซ้อนหรือตกหล่น
+                  </p>
+                </div>
+                
+                <button 
+                  onClick={() => {
+                    if(window.confirm("ต้องการล้างบันทึกการเช็กรับประทานยาทั้งหมดของวันนี้เพื่อเริ่มใหม่ใช่หรือไม่?")) {
+                      setTakenTracker({});
+                      triggerNotification("รีเซ็ตสถานะการทานยาประจำวันเรียบร้อยแล้ว");
+                    }
+                  }}
+                  className="bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-600 font-bold transition"
+                >
+                  เริ่มวันใหม่
+                </button>
+              </div>
+
+              {/* Time Slots grid */}
+              <div className="space-y-6">
+                {["เช้า", "กลางวัน", "เย็น", "ก่อนนอน"].map((slot) => {
+                  const slotMeds = medicines.filter(m => m.timeSlots && m.timeSlots.includes(slot));
+                  const today = new Date().toDateString();
+                  
+                  return (
+                    <div key={slot} className="bg-slate-800/40 rounded-3xl p-6 border-2 border-slate-700/80">
+                      
+                      <div className="flex justify-between items-center border-b border-slate-700 pb-3 mb-4">
+                        <div className="flex items-center space-x-2">
+                          <span className="p-1.5 bg-pink-500/20 text-pink-300 rounded-lg">
+                            <Clock className="w-4 h-4" />
+                          </span>
+                          <h3 className="text-lg font-extrabold text-pink-100 font-sans">ช่วงเวลา: {slot}</h3>
+                        </div>
+                        <span className="bg-slate-700/60 text-slate-300 text-xs px-3 py-1 rounded-full font-bold">
+                          ยาในกลุ่มนี้: {slotMeds.length} ตัว
+                        </span>
+                      </div>
+
+                      {slotMeds.length === 0 ? (
+                        <p className="text-sm text-slate-500 py-4 text-center italic">
+                          ไม่มีรายการยาสำหรับช่วงเวลา {slot}
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {slotMeds.map((med) => {
+                            const isTaken = !!takenTracker[`${today}-${slot}-${med.id}`];
+                            return (
+                              <div 
+                                key={med.id}
+                                className={`p-4 rounded-2xl border transition-all ${
+                                  isTaken 
+                                    ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-100' 
+                                    : 'bg-slate-800 border-slate-700 hover:border-pink-500/30 text-slate-100'
+                                }`}
+                              >
+                                <div className="flex justify-between items-start">
+                                  <div className="space-y-1 pr-2">
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-xs text-slate-400 font-semibold">{med.disease}</span>
+                                      <span className="bg-pink-900/40 text-pink-300 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold">
+                                        {med.dosage}
+                                      </span>
+                                    </div>
+                                    <h4 className="font-bold text-sm text-white">{med.name}</h4>
+                                    
+                                    <div className="text-xs text-amber-300 font-medium">
+                                      ⚠️ {med.instructions}
+                                    </div>
+                                  </div>
+
+                                  <div className={`${med.pillColor} ${med.pillShape} border flex-shrink-0 flex items-center justify-center`} title="ลักษณะยา">
+                                    <span className="text-[6px] opacity-25 font-bold">RX</span>
+                                  </div>
+                                </div>
+
+                                <div className="border-t border-slate-700/60 my-3"></div>
+
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] text-slate-400">
+                                    {isTaken ? "✓ จ่ายยาเรียบร้อย" : "○ รอกล่องยาประจำวัน"}
+                                  </span>
+                                  
+                                  <button 
+                                    onClick={() => togglePillTaken(slot, med.id)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1 ${
+                                      isTaken 
+                                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                                        : 'bg-pink-600 hover:bg-pink-700 text-white'
+                                    }`}
+                                  >
+                                    {isTaken ? (
+                                      <>
+                                        <Check className="w-3.5 h-3.5" />
+                                        <span>ให้ยาแล้ว</span>
+                                      </>
+                                    ) : (
+                                      <span>ทำเครื่องหมายว่าจ่ายยา</span>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                    </div>
+                  );
+                })}
+              </div>
+
+            </div>
+          )}
+
+
+          {/* ================= TAB 3: MANAGE MEDICINE FORM ================= */}
+          {activeTab === 'manage' && (
+            <div className="space-y-6">
+              
+              <div className="bg-slate-800/80 p-6 rounded-3xl border border-slate-700/80">
+                <h2 className="text-2xl font-black text-white flex items-center space-x-2">
+                  <Plus className="w-6 h-6 text-pink-400" />
+                  <span>{isEditingMed ? "แก้ไขข้อมูลยา" : "เพิ่มยาตัวใหม่เข้าระบบ"}</span>
+                </h2>
+                <p className="text-sm text-slate-400">เมื่อเพิ่มหรือแก้ไขยา ระบบจะเขียนทับข้อมูลเฉพาะของคุณลง Google Sheets ทันที</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                
+                {/* Form area */}
+                <form onSubmit={handleMedSubmit} className="md:col-span-8 bg-slate-800/40 p-6 rounded-3xl border border-slate-700/80 space-y-4 text-slate-200">
+                  
+                  {/* Row 1: Medicine Name */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-pink-300 mb-1">
+                      ชื่อยา (และยี่ห้อถ้ามี) <span className="text-red-400">*</span>
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="เช่น Metformin, Paracetamol..."
+                      value={medForm.name}
+                      onChange={(e) => setMedForm({ ...medForm, name: e.target.value })}
+                      className="w-full text-sm p-3 rounded-xl bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-pink-500 text-slate-100"
+                      required
+                    />
+                  </div>
+
+                  {/* Row 2: Disease Group */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-pink-300 mb-1">
+                        รักษาอาการ / กลุ่มโรค
+                      </label>
+                      <select 
+                        value={medForm.disease}
+                        onChange={(e) => setMedForm({ ...medForm, disease: e.target.value })}
+                        className="w-full text-sm p-3 rounded-xl bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-pink-500 text-slate-100 text-slate-300"
+                      >
+                        {availableDiseases.map(d => (
+                          <option key={d} value={d} className="bg-slate-900">{d}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-pink-300 mb-1">
+                        ขนาด / โดส (เช่น 500 มก., 1 เม็ด)
+                      </label>
+                      <input 
+                        type="text" 
+                        placeholder="เช่น 1 เม็ด, 10ml"
+                        value={medForm.dosage}
+                        onChange={(e) => setMedForm({ ...medForm, dosage: e.target.value })}
+                        className="w-full text-sm p-3 rounded-xl bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-pink-500 text-slate-100"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 3: Barcode Integration */}
+                  <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-700 space-y-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-pink-300">
+                      ข้อมูลสแกนบาร์โค้ด (Barcode)
+                    </label>
+                    <div className="flex space-x-2">
+                      <input 
+                        type="text" 
+                        placeholder="กรอกเลขบาร์โค้ดหลังซอง"
+                        value={medForm.barcode}
+                        onChange={(e) => setMedForm({ ...medForm, barcode: e.target.value })}
+                        className="flex-1 text-sm p-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 font-mono"
+                      />
+                      <button 
+                        type="button" 
+                        onClick={simulateBarcodeScan}
+                        className="bg-pink-600 hover:bg-pink-700 text-white text-xs px-4 py-2 rounded-lg font-bold flex items-center space-x-1 transition"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>จำลองสแกน</span>
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      * สามารถกดสแกนเพื่อจำลองระบบดึงข้อมูลอัตโนมัติมาเติมในฟอร์มทันที
+                    </p>
+                  </div>
+
+                  {/* Row 4: Time Slots */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-pink-300 mb-2">
+                      เวลาที่ทาน (เลือกได้หลายช่วง)
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {["เช้า", "กลางวัน", "เย็น", "ก่อนนอน"].map(slot => {
+                        const isChecked = medForm.timeSlots && medForm.timeSlots.includes(slot);
+                        return (
+                          <button
+                            key={slot}
+                            type="button"
+                            onClick={() => handleTimeSlotToggle(slot)}
+                            className={`p-2.5 rounded-xl border font-bold text-xs transition flex items-center justify-center space-x-1 ${
+                              isChecked 
+                                ? 'bg-pink-600 border-pink-500 text-white' 
+                                : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
+                            }`}
+                          >
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>{slot}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Row 5: Instructions */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-pink-300 mb-1">
+                      วิธีทาน / ข้อควรระวังพิเศษ
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="เช่น ทานหลังอาหารทันที, ทานท้องว่างก่อนอาหาร 30 นาที"
+                      value={medForm.instructions}
+                      onChange={(e) => setMedForm({ ...medForm, instructions: e.target.value })}
+                      className="w-full text-sm p-3 rounded-xl bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-pink-500 text-slate-100"
+                    />
+                  </div>
+
+                  {/* Row 6: Visual Pill Selection */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-900/40 p-4 rounded-xl border border-slate-700">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-pink-300 mb-2">
+                        เลือกสีเม็ดยา
+                      </label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {colorsPreset.map(color => (
+                          <button
+                            key={color.name}
+                            type="button"
+                            onClick={() => setMedForm({ ...medForm, pillColor: color.value })}
+                            className={`p-1.5 text-[10px] rounded border font-semibold flex items-center justify-center ${
+                              medForm.pillColor === color.value 
+                                ? 'border-pink-500 bg-slate-800 ring-2 ring-pink-500/50 text-slate-100' 
+                                : 'border-slate-700 bg-slate-900 text-slate-300'
+                            }`}
+                          >
+                            <span className={`w-3 h-3 rounded-full mr-1 ${color.value}`}></span>
+                            {color.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-pink-300 mb-2">
+                        เลือกรูปทรงเม็ดยา
+                      </label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {shapesPreset.map(shape => (
+                          <button
+                            key={shape.name}
+                            type="button"
+                            onClick={() => setMedForm({ ...medForm, pillShape: shape.value })}
+                            className={`p-1 text-[10px] rounded border font-semibold ${
+                              medForm.pillShape === shape.value 
+                                ? 'border-pink-500 bg-slate-800 ring-2 ring-pink-500/50 text-slate-100' 
+                                : 'border-slate-700 bg-slate-900 text-slate-300'
+                            }`}
+                          >
+                            {shape.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Row 7: Notes */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-pink-300 mb-1">
+                      อื่นๆ (รายละเอียดที่ต้องการจำเพิ่มเติม)
+                    </label>
+                    <textarea 
+                      rows="2"
+                      placeholder="เช่น ยาเหลือต่ำกว่า 5 เม็ดให้รีบไปโรงพยาบาล"
+                      value={medForm.notes}
+                      onChange={(e) => setMedForm({ ...medForm, notes: e.target.value })}
+                      className="w-full text-sm p-3 rounded-xl bg-slate-900 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-pink-500 text-slate-100"
+                    ></textarea>
+                  </div>
+
+                  {/* Submit buttons */}
+                  <div className="flex space-x-3 pt-4">
+                    <button
+                      type="submit"
+                      disabled={isSaving}
+                      className="flex-1 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white font-extrabold py-3 px-6 rounded-2xl shadow-lg transition transform active:scale-95 disabled:opacity-40"
+                    >
+                      {isSaving ? "กำลังจัดส่งข้อมูลเข้าตาราง..." : isEditingMed ? "✓ บันทึกการแก้ไขลงชีต" : "+ เพิ่มรายการยานี้ลงชีต"}
+                    </button>
+                    {isEditingMed && (
+                      <button
+                        type="button"
+                        onClick={resetMedForm}
+                        className="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-3 px-6 rounded-2xl transition"
+                      >
+                        ยกเลิกแก้ไข
+                      </button>
+                    )}
+                  </div>
+
+                </form>
+
+                {/* Right Side: Quick Preview */}
+                <div className="md:col-span-4 space-y-4">
+                  <div className="bg-pink-100 text-slate-800 rounded-3xl p-6 border-4 border-pink-200 text-center flex flex-col items-center justify-center sticky top-24 shadow-md">
+                    <span className="bg-pink-300 text-pink-900 text-[10px] font-black px-3 py-1 rounded-full uppercase mb-4 tracking-wider">
+                      ตัวอย่างลักษณะยาที่จะบันทึก
+                    </span>
+
+                    <div className="w-28 h-28 bg-white rounded-2xl shadow-inner border border-pink-200 flex items-center justify-center mb-4">
+                      <div className={`${medForm.pillColor} ${medForm.pillShape} border-2 shadow-md flex items-center justify-center overflow-hidden`}>
+                        <span className="text-[8px] opacity-30 font-bold">RX</span>
+                      </div>
+                    </div>
+
+                    <h4 className="font-extrabold text-slate-900 text-md truncate max-w-full">
+                      {medForm.name || "(กรอกชื่อยาเพื่อดูตัวอย่าง)"}
+                    </h4>
+                    
+                    <p className="text-xs text-slate-600 mt-1">
+                      รักษา: <span className="font-bold text-pink-700">{medForm.disease}</span>
+                    </p>
+
+                    <div className="mt-4 border-t border-pink-200 w-full pt-3 text-left space-y-1.5 text-xs text-slate-600">
+                      <div>ขนาด: <span className="font-bold text-slate-900">{medForm.dosage || "-"}</span></div>
+                      <div>ช่วงเวลา: <span className="font-bold text-slate-900">{medForm.timeSlots && medForm.timeSlots.join(", ") || "ไม่ได้ระบุ"}</span></div>
+                      <div>วิธีทาน: <span className="font-bold text-red-600">{medForm.instructions || "-"}</span></div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+          )}
+
+        </div>
+
+      </main>
+
+      {/* Footer Navigation bar for Mobile Quick access */}
+      <footer className="fixed bottom-0 left-0 right-0 bg-slate-950/95 backdrop-blur border-t border-slate-800/80 z-30 py-1.5 shadow-2xl block">
+        <div className="max-w-md mx-auto flex justify-around text-[10px] font-bold">
+          
+          <button 
+            onClick={() => { setActiveTab('dashboard'); setSelectedDisease(null); }}
+            className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition ${
+              activeTab === 'dashboard' ? 'text-pink-400' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Folder className="w-5 h-5" />
+            <span>ดูยาทั้งหมด</span>
+          </button>
+
+          <button 
+            onClick={() => { setActiveTab('pillbox'); setSelectedDisease(null); }}
+            className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition ${
+              activeTab === 'pillbox' ? 'text-pink-400' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Calendar className="w-5 h-5" />
+            <span>ตารางจัดตรวจยา</span>
+          </button>
+
+          <button 
+            onClick={() => { setActiveTab('manage'); resetMedForm(); }}
+            className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition ${
+              activeTab === 'manage' ? 'text-pink-400' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Plus className="w-5 h-5" />
+            <span>แก้ไข/เพิ่มยา</span>
+          </button>
+
+        </div>
+      </footer>
+
+    </div>
+  );
+}
